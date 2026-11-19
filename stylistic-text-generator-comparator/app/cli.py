@@ -20,6 +20,9 @@ from app.llm import (
 )
 from app.storage import load_corpus
 
+import transformers
+transformers.set_seed(42)
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Construct command-line argument parser."""
