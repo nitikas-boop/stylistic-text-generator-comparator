@@ -52,15 +52,15 @@ class NGramModel:
         if isinstance(corpus, str):
             tokens = tokenize_ngram(corpus, lowercase=True)
         else:
-            tokens = [tok.lower() if tok.isalnum() else tok for tok in corpus]
+            tokens = [token.lower() if token.isalnum() else token for token in corpus]
 
         if not tokens:
             return
 
         self.total_tokens += len(tokens)
-        for tok in tokens:
-            self.vocab.add(tok)
-            self.unigram_counts[tok] += 1
+        for token in tokens:
+            self.vocab.add(token)
+            self.unigram_counts[token] += 1
 
         # Build counts for order n and all lower orders (for robust backoff)
         for k in range(1, self.n + 1):
@@ -165,13 +165,13 @@ class NGramModel:
 
         # Detokenize tokens into readable commentary text
         text = ""
-        for i, tok in enumerate(generated):
-            if not text or tok in ".,!?;:":
-                text += tok
-            elif tok.startswith("'"):
-                text += tok
+        for token in generated:
+            if not text or token in ".,!?;:":
+                text += token
+            elif token.startswith("'"):
+                text += token
             else:
-                text += " " + tok
+                text += " " + token
 
         # Capitalize first letter of sentences
         sentences = [s.strip().capitalize() for s in text.split(". ") if s.strip()]

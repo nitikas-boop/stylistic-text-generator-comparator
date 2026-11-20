@@ -82,14 +82,13 @@ class SimpleSportsTokenizer:
                 if t not in tokens:
                     tokens.append(t)
         else:
-            # Seed with sports commentary vocabulary
             sample_words = tokenize_ngram(DEFAULT_CORPUS_TEXT, lowercase=False)
             for w in sample_words:
                 if w not in tokens:
                     tokens.append(w)
 
-        self.vocab = {tok: idx for idx, tok in enumerate(tokens)}
-        self.inv_vocab = {idx: tok for tok, idx in self.vocab.items()}
+        self.vocab = {token: idx for idx, token in enumerate(tokens)}
+        self.inv_vocab = {idx: token for token, idx in self.vocab.items()}
 
     def __len__(self) -> int:
         return len(self.vocab)
@@ -103,7 +102,7 @@ class SimpleSportsTokenizer:
         padding: bool = False,
     ) -> Any:
         tokens = tokenize_ngram(text, lowercase=False)
-        ids = [self.vocab.get(tok, self.vocab.get(tok.lower(), self.eos_token_id)) for tok in tokens]
+        ids = [self.vocab.get(token, self.vocab.get(token.lower(), self.eos_token_id)) for token in tokens]
 
         if truncation and max_length is not None and len(ids) > max_length:
             ids = ids[:max_length]
@@ -124,10 +123,10 @@ class SimpleSportsTokenizer:
 
         words = []
         for tid in token_ids:
-            tok = self.inv_vocab.get(tid, "")
-            if skip_special_tokens and tok in (self.pad_token, self.eos_token):
+            token = self.inv_vocab.get(tid, "")
+            if skip_special_tokens and token in (self.pad_token, self.eos_token):
                 continue
-            words.append(tok)
+            words.append(token)
 
         text = ""
         for w in words:
@@ -165,16 +164,13 @@ class LoRALinear(nn.Module):
         self.alpha = float(alpha)
         self.scaling = self.alpha / float(rank) if rank > 0 else 1.0
 
-        # Freeze the base layer weights
         for param in self.original_layer.parameters():
             param.requires_grad = False
 
-        # Determine input and output feature dimensions
         if hasattr(original_layer, "in_features") and hasattr(original_layer, "out_features"):
             self.in_features = original_layer.in_features
             self.out_features = original_layer.out_features
         elif hasattr(original_layer, "nx") and hasattr(original_layer, "nf"):
-            # Hugging Face GPT-2 Conv1D layer
             self.in_features = original_layer.nx
             self.out_features = original_layer.nf
         elif hasattr(original_layer, "weight"):
@@ -188,29 +184,19 @@ class LoRALinear(nn.Module):
         else:
             raise ValueError(f"Cannot infer feature dimensions from {original_layer}")
 
-        # LoRA low-rank trainable weight matrices
-        # lora_A: [rank, in_features]
         self.lora_A = nn.Parameter(torch.empty(self.rank, self.in_features))
-        # lora_B: [out_features, rank]
         self.lora_B = nn.Parameter(torch.zeros(self.out_features, self.rank))
-
         self.dropout = nn.Dropout(p=dropout) if dropout > 0.0 else nn.Identity()
 
-        # Initialize weights: A is Gaussian/Kaiming uniform, B is strictly zero
         nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
         nn.init.zeros_(self.lora_B)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # Base forward pass through original frozen layer
         base_output = self.original_layer(x)
-
-        # LoRA forward pass: F.linear(F.linear(x, A), B) * scaling
-        # x: [..., in_features] -> A: [..., rank] -> B: [..., out_features]
         lora_drop = self.dropout(x)
         lora_step_a = F.linear(lora_drop, self.lora_A)
         lora_step_b = F.linear(lora_step_a, self.lora_B)
         lora_output = lora_step_b * self.scaling
-
         return base_output + lora_output
 
 
@@ -221,12 +207,7 @@ def inject_lora_adapters(
     alpha: float = 16.0,
     dropout: float = 0.0,
 ) -> list[str]:
-    """Inject custom LoRALinear adapters into target attention layers of the model.
-
-    Freezes all base model parameters and replaces matching linear/Conv1D modules.
-    Returns list of names of replaced modules.
-    """
-    # 1. Freeze every parameter in the base model
+    """Inject custom LoRALinear adapters into target attention layers of the model."""
     for param in model.parameters():
         param.requires_grad = False
 
@@ -280,14 +261,9 @@ def load_model_and_tokenizer(
     device: torch.device | None = None,
     fallback_offline: bool = True,
 ) -> tuple[nn.Module, Any]:
-    """Load a small pre-trained Hugging Face causal LM and tokenizer.
-
-    If network is unavailable or model is not cached, gracefully initializes a local
-    lightweight GPT-2 architecture and SimpleSportsTokenizer.
-    """
+    """Load a small pre-trained Hugging Face causal LM and tokenizer."""
     dev = device or get_device()
 
-    # 1. Try local cache first to avoid unnecessary network latency
     try:
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -300,7 +276,6 @@ def load_model_and_tokenizer(
     except Exception:
         pass
 
-    # 2. If online, attempt to download from Hugging Face Hub
     if is_online():
         try:
             from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -314,7 +289,6 @@ def load_model_and_tokenizer(
         except Exception:
             pass
 
-    # 3. Fallback to local lightweight GPT-2 model and offline sports tokenizer
     if not fallback_offline:
         raise ConnectionError(
             f"Cannot load '{model_name}': offline and model is not cached locally."
@@ -349,21 +323,16 @@ def train_lora(
     max_length: int = 64,
     device: torch.device | None = None,
 ) -> list[float]:
-    """Lightweight fine-tuning loop updating only LoRA parameters on commentary text.
-
-    Optimized for laptop/CPU speed and minimal resource usage.
-    """
+    """Lightweight fine-tuning loop updating only LoRA parameters on commentary text."""
     dev = device or next(model.parameters()).device
     model.train()
 
-    # Verify that only LoRA parameters have requires_grad=True
     trainable_params = [p for p in model.parameters() if p.requires_grad]
     if not trainable_params:
         raise ValueError("No trainable parameters found. Did you call inject_lora_adapters?")
 
     optimizer = torch.optim.AdamW(trainable_params, lr=lr)
 
-    # Prepare chunks from commentary text
     sentences = [s.strip() for s in re.split(r"[.\n]+", corpus_text) if len(s.strip()) > 10]
     if not sentences:
         sentences = [corpus_text]
@@ -385,7 +354,6 @@ def train_lora(
             batch_input_ids.append(torch.tensor(ids, dtype=torch.long))
 
     if not batch_input_ids:
-        # Fallback dummy sequence
         batch_input_ids = [torch.tensor([1, 2, 3, 4, 1], dtype=torch.long)]
 
     pad_id = getattr(tokenizer, "pad_token_id", 0) or 0
@@ -395,14 +363,12 @@ def train_lora(
         epoch_loss_accum = 0.0
         steps = 0
 
-        # Process mini-batches
         for i in range(0, len(batch_input_ids), batch_size):
             chunk = batch_input_ids[i : i + batch_size]
             max_len = max(len(t) for t in chunk)
             padded = [torch.cat([t, torch.full((max_len - len(t),), pad_id, dtype=torch.long)]) for t in chunk]
             inputs = torch.stack(padded).to(dev)
 
-            # Causal language modeling: labels match inputs
             labels = inputs.clone()
             labels[labels == pad_id] = -100
 
@@ -435,7 +401,6 @@ def generate_llm(
     dev = device or next(model.parameters()).device
     model.eval()
 
-    # Tokenize input prompt
     if hasattr(tokenizer, "encode"):
         enc = tokenizer.encode(prompt, return_tensors="pt")
         if isinstance(enc, dict):
@@ -450,7 +415,6 @@ def generate_llm(
     eos_id = getattr(tokenizer, "eos_token_id", None) or 50256
     pad_id = getattr(tokenizer, "pad_token_id", None) or eos_id
 
-    # Try Hugging Face generate API first
     try:
         with torch.no_grad():
             output_ids = model.generate(
@@ -469,7 +433,6 @@ def generate_llm(
     except Exception:
         pass
 
-    # Autoregressive fallback generation loop
     curr_ids = input_ids.clone()
     with torch.no_grad():
         for _ in range(max_tokens):

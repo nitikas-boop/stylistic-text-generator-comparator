@@ -117,7 +117,7 @@ def tokenize_ngram(text: str, lowercase: bool = True) -> list[str]:
     # Regex captures word tokens (with optional internal hyphen or apostrophe) or punctuation
     tokens = re.findall(r"[A-Za-z0-9]+(?:['\-][A-Za-z0-9]+)*|[.,!?;:]", cleaned)
     if lowercase:
-        tokens = [tok.lower() if tok.isalnum() else tok for tok in tokens]
+        tokens = [token.lower() if token.isalnum() else token for token in tokens]
     return tokens
 
 
