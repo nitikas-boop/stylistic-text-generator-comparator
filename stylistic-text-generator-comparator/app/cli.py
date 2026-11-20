@@ -5,6 +5,9 @@ import argparse
 import sys
 from pathlib import Path
 
+import transformers
+transformers.set_seed(42)
+
 from app.core import (
     NGramModel,
     format_side_by_side,
@@ -19,9 +22,6 @@ from app.llm import (
     train_lora,
 )
 from app.storage import load_corpus
-
-import transformers
-transformers.set_seed(42)
 
 
 def build_parser() -> argparse.ArgumentParser:
